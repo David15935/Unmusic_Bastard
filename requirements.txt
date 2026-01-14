@@ -1,0 +1,4 @@
+python-telegram-bot==20.4
+yt-dlp
+aiohttp
+ffmpeg-python
