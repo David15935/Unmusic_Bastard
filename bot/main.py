@@ -23,6 +23,8 @@ from bot.handlers import (
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+LOCAL_BOT_API_URL = os.getenv("LOCAL_BOT_API_URL")
+LOCAL_BOT_API_FILE_URL = os.getenv("LOCAL_BOT_API_FILE_URL")
 if not BOT_TOKEN:
     try:
         from config.config import BOT_TOKEN as CONFIG_TOKEN
@@ -65,7 +67,14 @@ async def set_commands(app):
 
 
 def build_app():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    builder = ApplicationBuilder().token(BOT_TOKEN)
+    if LOCAL_BOT_API_URL:
+        builder = builder.base_url(LOCAL_BOT_API_URL)
+        if LOCAL_BOT_API_FILE_URL:
+            builder = builder.base_file_url(LOCAL_BOT_API_FILE_URL)
+        builder = builder.local_mode(True)
+
+    app = builder.build()
 
     app.add_handler(MessageHandler(filters.ALL, log_update, block=False), group=1)
 

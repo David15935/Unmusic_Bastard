@@ -185,3 +185,12 @@ Built by David Elisha Powered by Telegram, YouTube, Genius
 
 ---
 Happy coding 🎧🔥
+
+Local Bot API Server (optional for large uploads)
+
+1. Install Docker Desktop and restart.
+2. Copy `local-bot-api.env.example` to `local-bot-api.env` and set `TELEGRAM_API_ID`/`TELEGRAM_API_HASH`.
+3. Run: `docker compose up -d`
+4. Set in `.env`:
+   `LOCAL_BOT_API_URL=http://localhost:8081/bot`
+   `LOCAL_BOT_API_FILE_URL=http://localhost:8081/file/bot`

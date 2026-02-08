@@ -1,0 +1,12 @@
+﻿version: "3.8"
+services:
+  bot-api:
+    image: aiogram/telegram-bot-api:latest
+    container_name: telegram-bot-api
+    restart: unless-stopped
+    env_file:
+      - local-bot-api.env
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./bot-api-data:/var/lib/telegram-bot-api

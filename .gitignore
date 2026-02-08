@@ -8,3 +8,6 @@ logs/
 downloads/
 covers/
 .cache/
+bot-api-data/
+local-bot-api.env
+config/
