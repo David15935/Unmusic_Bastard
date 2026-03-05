@@ -1,196 +1,138 @@
-🎵 Telegram Music Bot
+# Unmusic_Bastard Telegram Music Bot
 
-A powerful Telegram music bot that lets users search, play, download MP3 files, view lyrics, manage queues, and explore trending music — all from simple text commands.
+Telegram music bot for searching, playing, downloading, lyrics, trending songs, queue, playlists, resume uploads, and inline search.
 
-Built with Python, python-telegram-bot, yt-dlp, and Genius API.
+## Latest Commit
+- Commit: `5955e26`
+- Message: `fix_inline_help_jsruntime`
+- Includes:
+- Fixed inline search flow and result payload
+- Added `/help` with detailed examples
+- Fixed `yt-dlp` `js_runtimes` format error
 
----
+## Features
+- MP3 delivery from YouTube search/url
+- `/search` with paginated buttons (Play/Queue)
+- `/download` and `/play`
+- `/lyrics` (Genius + fallback)
+- `/info`
+- `/trending`
+- Queue: `/queue`, `/skip`
+- Playlists: create/list/add/show/play/remove/removeitem
+- `/resume` for failed/partial uploads
+- Inline mode: `@your_bot_username <song or artist>`
 
-🚀 Features
+## Commands
+- `/start`
+- `/help`
+- `/play <song|artist|url>`
+- `/search <song|artist>`
+- `/download <song|artist|url>`
+- `/lyrics <song and artist>`
+- `/info <song|artist|url>`
+- `/trending`
+- `/queue`
+- `/skip`
+- `/playlist <subcommand>`
+- `/resume`
 
-✅ Search songs by name ✅ Play & send MP3 directly in chat ✅ Download high‑quality audio ✅ Lyrics lookup (Genius API) ✅ Queue system (play multiple tracks) ✅ Trending music (real data) ✅ Cover art preview ✅ Cached files for faster repeat plays
+## Project Structure
+```text
+Unmusic_Bastard/
+  bot/
+    main.py
+    handlers.py
+    player.py
+    lyrics.py
+    trending.py
+    queue.py
+  downloads/
+  covers/
+  logs/
+  .env
+  requirements.txt
+  docker-compose.yml
+```
 
----
+## Install
+1. Clone repo:
+```bash
+git clone https://github.com/David15935/Unmusic_Bastard.git
+cd Unmusic_Bastard
+```
 
-📌 Commands
-
-/start       – Welcome message
-/search     – Search for songs
-/play       – Play song by name
-/download   – Download MP3
-/lyrics     – Get song lyrics
-/info       – Song info
-/queue      – View queue
-/skip       – Skip current song
-/pause      – Pause playback
-/resume     – Resume playback
-/stop       – Stop playback
-/trending   – Trending songs
-
----
-
-🧱 Project Structure
-
-music_bot/
-│
-├── bot/
-│   ├── main.py
-│   ├── handlers.py
-│   ├── music_api.py
-│   ├── queue_manager.py
-│   ├── utils.py
-│
-├── requirements.txt
-└── README.md
-
----
-
-⚙️ Installation
-
-1️⃣ Clone project
-
-git clone <your-repo-url>
-cd music_bot
-
-2️⃣ Install dependencies
-
+2. Create venv and install dependencies:
+```bash
+python -m venv .venv
+.venv\Scripts\activate
 pip install -r requirements.txt
+```
 
-(Or manually)
+3. Install FFmpeg (Windows):
+```powershell
+winget install --id Gyan.FFmpeg -e --source winget --accept-source-agreements --accept-package-agreements
+```
 
-pip install python-telegram-bot yt-dlp lyricsgenius fastapi uvicorn
+4. Install Node.js (recommended for yt-dlp JS extraction):
+```powershell
+winget install -e --id OpenJS.NodeJS.LTS --source winget --accept-source-agreements --accept-package-agreements
+```
 
----
-
-### ⚙️ Termux Installation (Step-by-Step)
-
-1. **Install Termux**
-   Download Termux from the Play Store, F-Droid, or the official site.
-
-2. **Update Termux packages**
-   ```
-   pkg update && pkg upgrade
-   ```
-
-3. **Install Python and Git**
-   ```
-   pkg install python git
-   ```
-
-4. **Clone the Repository**
-   ```
-   git clone https://github.com/David15935/Unmusic_Bastard.git
-   cd Unmusic_Bastard/music_bot
-   ```
-
-5. **Install Dependencies**
-   ```
-   pip install -r requirements.txt
-   ```
-   Or install manually:
-   ```
-   pip install python-telegram-bot yt-dlp lyricsgenius fastapi uvicorn
-   ```
-
-6. **Set Environment Variables**
-   You'll need your bot token and Genius API token.
-   ```
-   export BOT_TOKEN=your_telegram_bot_token
-   export GENIUS_TOKEN=your_genius_api_token
-   ```
-
-7. **Run the Bot**
-   ```
-   python -m bot.main
-   ```
-
----
-
-### 🧪 Cloning & Testing on Other Platforms
-
-1. **Clone Repository**
-   ```
-   git clone https://github.com/David15935/Unmusic_Bastard.git
-   cd Unmusic_Bastard/music_bot
-   ```
-
-2. **Install Dependencies**
-   ```
-   pip install -r requirements.txt
-   ```
-
-3. **Set Environment Variables**
-   ```
-   export BOT_TOKEN=your_telegram_bot_token
-   export GENIUS_TOKEN=your_genius_api_token
-   ```
-
-4. **Run**
-   ```
-   python -m bot.main
-   ```
-
----
-
-🔐 Environment Variables
-
-Create these variables:
+5. Create `.env`:
+```env
 BOT_TOKEN=your_telegram_bot_token
 GENIUS_TOKEN=your_genius_api_token
+```
 
-Linux/macOS:
-export BOT_TOKEN=xxx
-export GENIUS_TOKEN=xxx
+## Run
+```powershell
+.venv\Scripts\python -m bot.main
+```
 
-Windows:
-set BOT_TOKEN=xxx
-set GENIUS_TOKEN=xxx
+## How To Use
+1. Open bot chat and run:
+```text
+/start
+/help
+```
 
----
+2. Quick examples:
+```text
+/play burna boy last last
+/search adele hello
+/download https://www.youtube.com/watch?v=dQw4w9WgXcQ
+/lyrics love nwantiti ckay
+/info calm down rema
+/trending
+```
 
-▶️ Run Locally
-python -m bot.main
+3. Inline mode usage:
+- Enable inline mode in BotFather (`/setinline`)
+- In any chat type:
+```text
+@your_bot_username asake lonely at the top
+```
 
----
+4. If upload breaks on long file:
+```text
+/resume
+```
 
-🌍 Free Deployment (24/7)
-Recommended platforms:
-• Railway.app ✅ • Render.com ✅
-Start command:
-python -m bot.main
+## Optional: Local Telegram Bot API (for larger upload capability)
+1. Install Docker Desktop.
+2. Configure `local-bot-api.env` from `local-bot-api.env.example`.
+3. Start:
+```bash
+docker compose up -d
+```
+4. Add to `.env`:
+```env
+LOCAL_BOT_API_URL=http://localhost:8081/bot
+LOCAL_BOT_API_FILE_URL=http://localhost:8081/file/bot
+```
 
----
+## Notes
+- Telegram cloud Bot API has upload limits per file.
+- This bot can split large files and send in parts.
+- For very high concurrency, use VPS + webhook + queue workers.
 
-📦 Tech Stack
-Python 3.10+
-python-telegram-bot
-yt-dlp
-Genius API
-FastAPI (optional uptime server)
-
----
-
-⚠️ Notes
-• Telegram bots send audio files (no live streaming)
-• Files are cached locally for faster replays
-• Works on PC, VPS, and Termux
-
----
-📜 License
-MIT License — free to use and modify.
-
----
-⭐ Credits
-Built by David Elisha Powered by Telegram, YouTube, Genius
-
----
-Happy coding 🎧🔥
-
-Local Bot API Server (optional for large uploads)
-
-1. Install Docker Desktop and restart.
-2. Copy `local-bot-api.env.example` to `local-bot-api.env` and set `TELEGRAM_API_ID`/`TELEGRAM_API_HASH`.
-3. Run: `docker compose up -d`
-4. Set in `.env`:
-   `LOCAL_BOT_API_URL=http://localhost:8081/bot`
-   `LOCAL_BOT_API_FILE_URL=http://localhost:8081/file/bot`
