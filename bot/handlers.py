@@ -1,8 +1,16 @@
-﻿import asyncio
+import asyncio
 import logging
 import os
+import hashlib
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
+from telegram import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InlineQueryResultArticle,
+    InputFile,
+    InputTextMessageContent,
+    Update,
+)
 from telegram.error import Conflict, NetworkError, TimedOut
 from telegram.ext import ContextTypes
 
@@ -155,21 +163,125 @@ async def log_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info("update=%s", data)
 
 
+async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    inline = update.inline_query
+    if not inline:
+        return
+
+    query = (inline.query or "").strip()
+    if not query:
+        await inline.answer(
+            results=[],
+            cache_time=10,
+            is_personal=True,
+        )
+        return
+
+    try:
+        results = await search_youtube(query, limit=10)
+    except Exception:
+        logger.exception("Inline search failed query=%s", query)
+        await inline.answer(results=[], cache_time=5, is_personal=True)
+        return
+
+    inline_results = []
+    for idx, item in enumerate(results):
+        title = item.get("title") or "Unknown"
+        uploader = item.get("uploader") or "Unknown"
+        url = item.get("webpage_url") or item.get("url") or ""
+        if not url:
+            continue
+
+        message_text = (
+            f"Title: {title}\n"
+            f"Artist/Uploader: {uploader}\n"
+            f"Source: {url}\n\n"
+            f"Commands:\n"
+            f"/play {url}\n"
+            f"/download {url}\n"
+            f"/info {url}"
+        )
+
+        result_id = hashlib.md5(f"{item.get('id')}-{url}-{idx}".encode("utf-8")).hexdigest()
+
+        inline_results.append(
+            InlineQueryResultArticle(
+                id=result_id,
+                title=title,
+                description=uploader,
+                input_message_content=InputTextMessageContent(message_text),
+            )
+        )
+
+    await inline.answer(inline_results, cache_time=20, is_personal=True)
+
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info("/start from chat_id=%s", update.effective_chat.id if update.effective_chat else None)
+    username = context.bot.username or "your_bot_username"
     text = (
         "Music Bot ready.\n\n"
-        "Commands:\n"
+        "Use /help for full guide and examples.\n\n"
+        "Quick commands:\n"
         "/play <song>\n"
+        "/search <song or artist>\n"
         "/download <song>\n"
-        "/lyrics <song>\n"
-        "/info <song>\n"
-        "/trending\n"
+        f"Inline mode: @{username} <song or artist>"
+    )
+    await update.effective_message.reply_text(text)
+
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    username = context.bot.username or "your_bot_username"
+    text = (
+        "Music Bot Help\n\n"
+        "1) Play audio now\n"
+        "Command: /play <song, artist, or url>\n"
+        "Examples:\n"
+        "/play blinding lights the weeknd\n"
+        "/play burna boy last last\n"
+        "/play https://www.youtube.com/watch?v=dQw4w9WgXcQ\n\n"
+        "2) Search and choose result\n"
+        "Command: /search <song or artist>\n"
+        "Examples:\n"
+        "/search asake lonely at the top\n"
+        "/search adele\n\n"
+        "3) Download audio file\n"
+        "Command: /download <song, artist, or url>\n"
+        "Examples:\n"
+        "/download wizkid essence\n"
+        "/download https://www.youtube.com/watch?v=...\n\n"
+        "4) Lyrics\n"
+        "Command: /lyrics <song and artist>\n"
+        "Example:\n"
+        "/lyrics love nwantiti ckay\n\n"
+        "5) Song info\n"
+        "Command: /info <song, artist, or url>\n"
+        "Example:\n"
+        "/info calm down rema\n\n"
+        "6) Trending songs\n"
+        "Command: /trending\n"
+        "Tap any button to fetch audio.\n\n"
+        "7) Queue controls\n"
+        "Commands:\n"
         "/queue\n"
-        "/skip\n"
-        "/playlist <subcommand>\n"
-        "/resume - Resume failed upload\n"
+        "/skip\n\n"
+        "8) Resume failed upload\n"
+        "Command: /resume\n"
+        "Use when a long upload times out.\n\n"
+        "9) Playlists\n"
+        "Commands:\n"
+        "/playlist create <name>\n"
+        "/playlist list\n"
+        "/playlist add <name> <song>\n"
+        "/playlist show <name>\n"
+        "/playlist play <name>\n"
+        "/playlist remove <name>\n"
+        "/playlist removeitem <name> <index>\n\n"
+        "10) Inline search (inside any chat)\n"
+        f"Type: @{username} <song or artist>\n"
+        "Pick a result, then run /play or /download from the returned message."
     )
     await update.effective_message.reply_text(text)
 
@@ -280,6 +392,29 @@ async def play(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _create_task(context, _play_and_send(update, context, query))
         return
 
+    results = await search_youtube(query, limit=15)
+    if not results:
+        await update.effective_message.reply_text("No results found.")
+        return
+
+    context.chat_data["search_results"] = results
+    context.chat_data["search_query"] = query
+    await _send_search_page(update.effective_message, context, page=0)
+
+
+async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(
+        "/search args=%s chat_id=%s",
+        context.args,
+        update.effective_chat.id if update.effective_chat else None,
+    )
+    if not context.args:
+        await update.effective_message.reply_text(
+            "Usage: /search <song, artist, or song - artist>"
+        )
+        return
+
+    query = " ".join(context.args).strip()
     results = await search_youtube(query, limit=15)
     if not results:
         await update.effective_message.reply_text("No results found.")

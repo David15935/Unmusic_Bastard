@@ -11,6 +11,7 @@ from telegram.ext import (
     ApplicationBuilder,
     CallbackQueryHandler,
     CommandHandler,
+    InlineQueryHandler,
     MessageHandler,
     filters,
 )
@@ -19,12 +20,15 @@ from bot.handlers import (
     button_handler,
     download,
     error_handler,
+    help_command,
     info,
+    inline_query,
     log_update,
     lyrics,
     play,
     playlist,
     resume,
+    search,
     show_queue,
     skip,
     start,
@@ -79,7 +83,9 @@ def _configure_logging() -> None:
 async def set_commands(app: Application) -> None:
     commands = [
         BotCommand("start", "Start the bot"),
+        BotCommand("help", "How to use all commands"),
         BotCommand("play", "Search and play a song"),
+        BotCommand("search", "Search by song/artist"),
         BotCommand("download", "Download a song"),
         BotCommand("lyrics", "Get song lyrics"),
         BotCommand("info", "Get song info"),
@@ -106,7 +112,9 @@ def build_app() -> Application:
 
     app.add_handler(MessageHandler(filters.ALL, log_update, block=False), group=1)
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("play", play))
+    app.add_handler(CommandHandler("search", search))
     app.add_handler(CommandHandler("download", download))
     app.add_handler(CommandHandler("lyrics", lyrics))
     app.add_handler(CommandHandler("info", info))
@@ -115,6 +123,7 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("skip", skip))
     app.add_handler(CommandHandler("playlist", playlist))
     app.add_handler(CommandHandler("resume", resume))
+    app.add_handler(InlineQueryHandler(inline_query))
     app.add_handler(CallbackQueryHandler(button_handler))
 
     app.add_error_handler(error_handler)

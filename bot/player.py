@@ -25,6 +25,30 @@ DEFAULT_SPLIT_SECONDS = 10 * 60
 
 CACHE_LOCK = asyncio.Lock()
 _CACHE: Dict[str, Dict] = {}
+_JS_WARNING_SHOWN = False
+
+
+class _YDLLogger:
+    def debug(self, msg):
+        logger.debug(msg)
+
+    def info(self, msg):
+        logger.info(msg)
+
+    def warning(self, msg):
+        global _JS_WARNING_SHOWN
+        text = str(msg)
+        if "No supported JavaScript runtime could be found" in text:
+            if not _JS_WARNING_SHOWN:
+                _JS_WARNING_SHOWN = True
+                logger.warning(
+                    "JS runtime missing for yt-dlp. Install Node.js for best YouTube extraction quality."
+                )
+            return
+        logger.warning(text)
+
+    def error(self, msg):
+        logger.error(msg)
 
 
 def _progress(d):
@@ -32,6 +56,15 @@ def _progress(d):
         logger.info("yt-dlp downloading: %s %s", d.get('filename'), d.get('eta'))
     elif d.get('status') == 'finished':
         logger.info("yt-dlp finished: %s", d.get('filename'))
+
+
+def _get_js_runtimes() -> Dict[str, Dict[str, str]]:
+    runtimes: Dict[str, Dict[str, str]] = {}
+    for runtime in ("node", "deno", "bun"):
+        found = shutil.which(runtime)
+        if found:
+            runtimes[runtime] = {"path": found}
+    return runtimes
 
 def _ensure_dirs():
     DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
@@ -192,21 +225,24 @@ async def fetch_audio(query_or_url: str) -> Dict:
 
     ffmpeg_location = _find_ffmpeg_location()
     ydl_opts = {
-        "format": "bestaudio/best",
+        "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio",
         "outtmpl": {
             "default": str(DOWNLOADS_DIR / "%(id)s.%(ext)s"),
             "thumbnail": str(COVERS_DIR / "%(id)s.%(ext)s"),
         },
-        "writethumbnail": True,
+        "writethumbnail": False,
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
         "cachedir": str(CACHE_DIR / "yt-dlp"),
         "concurrent_fragment_downloads": 4,
         "retries": 3,
-        "logger": logger,
+        "logger": _YDLLogger(),
         "progress_hooks": [_progress],
     }
+    js_runtimes = _get_js_runtimes()
+    if js_runtimes:
+        ydl_opts["js_runtimes"] = js_runtimes
     if ffmpeg_location:
         ydl_opts["ffmpeg_location"] = ffmpeg_location
 
