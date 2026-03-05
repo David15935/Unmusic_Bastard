@@ -89,6 +89,20 @@ GENIUS_TOKEN=your_genius_api_token
 .venv\Scripts\python -m bot.main
 ```
 
+## Deploy Now (Railway, Recommended)
+1. Push this repo to GitHub (already done).
+2. Go to Railway dashboard and create a new project from GitHub repo `David15935/Unmusic_Bastard`.
+3. Railway will detect `Dockerfile` and build automatically.
+4. Add environment variables in Railway service:
+- `BOT_TOKEN=your_telegram_bot_token`
+- `GENIUS_TOKEN=your_genius_api_token`
+5. Deploy the service.
+6. Verify logs show `Starting Music Bot...` and `Application started`.
+
+Notes:
+- This bot is a background worker (long polling), not a web server.
+- Keep only one active bot instance to avoid Telegram polling conflicts.
+
 ## How To Use
 1. Open bot chat and run:
 ```text
@@ -135,4 +149,3 @@ LOCAL_BOT_API_FILE_URL=http://localhost:8081/file/bot
 - Telegram cloud Bot API has upload limits per file.
 - This bot can split large files and send in parts.
 - For very high concurrency, use VPS + webhook + queue workers.
-
