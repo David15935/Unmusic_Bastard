@@ -3,9 +3,10 @@ import logging
 import os
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
+from telegram.error import Conflict, NetworkError, TimedOut
 from telegram.ext import ContextTypes
 
-from bot.player import fetch_audio, get_info, search_youtube
+from bot.player import fetch_audio, get_info, search_youtube, split_audio_for_telegram
 from bot.lyrics import fetch_lyrics
 from bot.trending import get_trending
 from bot.queue import (
@@ -23,8 +24,11 @@ from bot.queue import (
 logger = logging.getLogger(__name__)
 
 SEARCH_PAGE_SIZE = 5
-DOWNLOAD_TIMEOUT_SEC = 240
-UPLOAD_TIMEOUT_SEC = 180
+DOWNLOAD_TIMEOUT_SEC = 1800
+UPLOAD_TIMEOUT_SEC = 900
+MAX_CONCURRENT_DOWNLOADS = 6
+
+_download_semaphore = asyncio.Semaphore(MAX_CONCURRENT_DOWNLOADS)
 
 
 def _is_url(text: str) -> bool:
@@ -51,7 +55,94 @@ def _create_task(context: ContextTypes.DEFAULT_TYPE, coro):
     return task
 
 
+async def _send_part_with_retry(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    part_path: str,
+    title: str,
+    filename: str,
+) -> str:
+    last_error = None
+
+    for attempt in range(1, 4):
+        try:
+            with open(part_path, "rb") as f:
+                input_file = InputFile(f, filename=filename)
+                await context.bot.send_audio(
+                    chat_id=chat_id,
+                    audio=input_file,
+                    title=title,
+                    write_timeout=300,
+                    read_timeout=300,
+                    connect_timeout=30,
+                    pool_timeout=30,
+                )
+            return "audio"
+        except (TimedOut, NetworkError) as exc:
+            last_error = exc
+            logger.warning("Audio upload retry %s failed for %s: %s", attempt, part_path, exc)
+            await asyncio.sleep(attempt * 2)
+
+    for attempt in range(1, 3):
+        try:
+            with open(part_path, "rb") as f:
+                input_file = InputFile(f, filename=filename)
+                await context.bot.send_document(
+                    chat_id=chat_id,
+                    document=input_file,
+                    write_timeout=300,
+                    read_timeout=300,
+                    connect_timeout=30,
+                    pool_timeout=30,
+                )
+            return "document"
+        except (TimedOut, NetworkError) as exc:
+            last_error = exc
+            logger.warning(
+                "Document upload retry %s failed for %s: %s", attempt, part_path, exc
+            )
+            await asyncio.sleep(attempt * 2)
+
+    raise RuntimeError(f"Upload failed after retries: {last_error}")
+
+
+async def _send_parts(
+    context: ContextTypes.DEFAULT_TYPE,
+    message,
+    chat_id: int,
+    title: str,
+    parts,
+    start_idx: int = 0,
+    progress_state: dict | None = None,
+) -> None:
+    if len(parts) > 1 and start_idx == 0:
+        await message.reply_text(f"Large file detected. Sending {len(parts)} parts...")
+
+    for idx in range(start_idx, len(parts)):
+        part = parts[idx]
+        size = os.path.getsize(part)
+        human_idx = idx + 1
+        logger.info("Uploading part=%s size=%s bytes path=%s", human_idx, size, part)
+        await message.reply_text(
+            f"Uploading part {human_idx}/{len(parts)} ({round(size/1024/1024,1)} MB)..."
+        )
+        filename = f"{title}_part{human_idx}{os.path.splitext(part)[1]}"
+        sent_as = await _send_part_with_retry(
+            context=context,
+            chat_id=chat_id,
+            part_path=part,
+            title=title if len(parts) == 1 else f"{title} (Part {human_idx})",
+            filename=filename,
+        )
+        logger.info("Uploaded part=%s as=%s", human_idx, sent_as)
+        if progress_state is not None:
+            progress_state["next_idx"] = human_idx
+
+
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if isinstance(context.error, Conflict):
+        logger.warning("Ignored Telegram conflict: %s", context.error)
+        return
     logger.exception("Unhandled exception", exc_info=context.error)
     if update and update.effective_message:
         await update.effective_message.reply_text("Something went wrong.")
@@ -78,6 +169,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/queue\n"
         "/skip\n"
         "/playlist <subcommand>\n"
+        "/resume - Resume failed upload\n"
     )
     await update.effective_message.reply_text(text)
 
@@ -137,7 +229,8 @@ async def _play_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE, que
     await message.reply_text("Preparing audio...")
 
     try:
-        data = await asyncio.wait_for(fetch_audio(query), timeout=DOWNLOAD_TIMEOUT_SEC)
+        async with _download_semaphore:
+            data = await asyncio.wait_for(fetch_audio(query), timeout=DOWNLOAD_TIMEOUT_SEC)
     except asyncio.TimeoutError:
         await message.reply_text("Download timed out. Try another result.")
         return
@@ -153,30 +246,24 @@ async def _play_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE, que
         return
 
     try:
-        size = None
-        try:
-            size = os.path.getsize(path)
-        except Exception:
-            pass
-        if size:
-            logger.info("Uploading size=%s bytes", size)
-            await message.reply_text(f"Uploading ({round(size/1024/1024,1)} MB)...")
-        with open(path, "rb") as f:
-            filename = f"{title}{os.path.splitext(path)[1]}"
-            input_file = InputFile(f, filename=filename)
-            if path.lower().endswith(".mp3"):
-                await asyncio.wait_for(
-                    context.bot.send_audio(chat_id=chat_id, audio=input_file, title=title),
-                    timeout=UPLOAD_TIMEOUT_SEC,
-                )
-            else:
-                await asyncio.wait_for(
-                    context.bot.send_document(chat_id=chat_id, document=input_file),
-                    timeout=UPLOAD_TIMEOUT_SEC,
-                )
+        parts = await split_audio_for_telegram(path)
+        progress_state = {"parts": parts, "title": title, "next_idx": 0}
+        context.chat_data["resume_upload"] = progress_state
+        await _send_parts(
+            context,
+            message,
+            chat_id,
+            title,
+            parts,
+            start_idx=0,
+            progress_state=progress_state,
+        )
+        context.chat_data.pop("resume_upload", None)
         await message.reply_text("Sent.")
     except asyncio.TimeoutError:
-        await message.reply_text("Upload timed out. Try another result.")
+        if "parts" not in locals():
+            context.chat_data["resume_upload"] = {"parts": [], "title": title, "next_idx": 0}
+        await message.reply_text("Upload timed out. Use /resume to continue from last part.")
     except Exception as exc:
         logger.exception("Upload failed")
         await message.reply_text(f"Upload failed: {exc}")
@@ -213,7 +300,8 @@ async def download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text("Preparing download...")
 
     try:
-        data = await asyncio.wait_for(fetch_audio(query), timeout=DOWNLOAD_TIMEOUT_SEC)
+        async with _download_semaphore:
+            data = await asyncio.wait_for(fetch_audio(query), timeout=DOWNLOAD_TIMEOUT_SEC)
     except asyncio.TimeoutError:
         await update.effective_message.reply_text("Download timed out. Try another result.")
         return
@@ -228,8 +316,58 @@ async def download(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text("Download failed.")
         return
 
-    with open(path, "rb") as f:
-        await update.effective_message.reply_document(f, filename=f"{title}.mp3")
+    try:
+        parts = await split_audio_for_telegram(path)
+        progress_state = {"parts": parts, "title": title, "next_idx": 0}
+        context.chat_data["resume_upload"] = progress_state
+        await _send_parts(
+            context=context,
+            message=update.effective_message,
+            chat_id=update.effective_chat.id,
+            title=title,
+            parts=parts,
+            start_idx=0,
+            progress_state=progress_state,
+        )
+        context.chat_data.pop("resume_upload", None)
+        await update.effective_message.reply_text("Sent.")
+    except Exception as exc:
+        logger.exception("Download command upload failed")
+        await update.effective_message.reply_text(
+            f"Upload failed: {exc}. Use /resume to continue."
+        )
+
+
+async def resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    state = context.chat_data.get("resume_upload")
+    if not state:
+        await update.effective_message.reply_text("No pending upload to resume.")
+        return
+
+    parts = state.get("parts") or []
+    title = state.get("title") or "audio"
+    next_idx = int(state.get("next_idx", 0))
+
+    if not parts or next_idx >= len(parts):
+        context.chat_data.pop("resume_upload", None)
+        await update.effective_message.reply_text("Nothing left to resume.")
+        return
+
+    try:
+        await _send_parts(
+            context=context,
+            message=update.effective_message,
+            chat_id=update.effective_chat.id,
+            title=title,
+            parts=parts,
+            start_idx=next_idx,
+            progress_state=state,
+        )
+        context.chat_data.pop("resume_upload", None)
+        await update.effective_message.reply_text("Resume completed.")
+    except Exception as exc:
+        logger.exception("Resume failed")
+        await update.effective_message.reply_text(f"Resume failed: {exc}")
 
 
 async def lyrics(update: Update, context: ContextTypes.DEFAULT_TYPE):

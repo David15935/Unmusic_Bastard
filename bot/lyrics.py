@@ -1,6 +1,7 @@
-﻿import os
-from dotenv import load_dotenv
+import os
+import requests
 import lyricsgenius
+from dotenv import load_dotenv
 
 load_dotenv()
 GENIUS_TOKEN = os.getenv("GENIUS_TOKEN")
@@ -23,15 +24,37 @@ def _get_client():
     return _genius
 
 
-def fetch_lyrics(query: str) -> str:
-    client = _get_client()
-    if not client:
-        return "GENIUS_TOKEN is not configured."
-
+def _fetch_lyrics_lrclib(query: str) -> str | None:
     try:
-        song = client.search_song(query)
-        if not song or not song.lyrics:
-            return "Lyrics not found."
-        return song.lyrics
+        r = requests.get("https://lrclib.net/api/search", params={"q": query}, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        if not data:
+            return None
+        candidate = data[0]
+        return candidate.get("plainLyrics") or candidate.get("syncedLyrics")
     except Exception:
-        return "Lyrics not found."
+        return None
+
+
+def fetch_lyrics(query: str) -> str:
+    query = query.strip()
+    if not query:
+        return "Usage: /lyrics <song name>"
+
+    client = _get_client()
+    if client:
+        try:
+            song = client.search_song(query)
+            if song and song.lyrics:
+                return song.lyrics
+        except Exception:
+            pass
+
+    fallback = _fetch_lyrics_lrclib(query)
+    if fallback:
+        return fallback
+
+    if not GENIUS_TOKEN:
+        return "Lyrics not found. Add GENIUS_TOKEN in .env for better results."
+    return "Lyrics not found."

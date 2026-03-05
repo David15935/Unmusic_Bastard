@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 import hashlib
 import json
 import os
@@ -21,6 +21,7 @@ CACHE_FILE = CACHE_DIR / "index.json"
 logger = logging.getLogger(__name__)
 
 MAX_BYTES = 50 * 1024 * 1024
+DEFAULT_SPLIT_SECONDS = 10 * 60
 
 CACHE_LOCK = asyncio.Lock()
 _CACHE: Dict[str, Dict] = {}
@@ -203,7 +204,6 @@ async def fetch_audio(query_or_url: str) -> Dict:
         "cachedir": str(CACHE_DIR / "yt-dlp"),
         "concurrent_fragment_downloads": 4,
         "retries": 3,
-        "max_filesize": MAX_BYTES,
         "logger": logger,
         "progress_hooks": [_progress],
     }
@@ -278,8 +278,6 @@ async def fetch_audio(query_or_url: str) -> Dict:
 
     size = os.path.getsize(mp3_path)
     logger.info("MP3 ready path=%s size=%s", mp3_path, size)
-    if size > MAX_BYTES:
-        raise RuntimeError("File too large for Telegram. Try another result.")
 
     payload = {
         "id": video_id,
@@ -293,4 +291,56 @@ async def fetch_audio(query_or_url: str) -> Dict:
 
     await _set_cache(cache_key, payload)
     return payload
+
+
+async def split_audio_for_telegram(
+    source_path: str,
+    max_bytes: int = MAX_BYTES,
+    split_seconds: int = DEFAULT_SPLIT_SECONDS,
+) -> List[str]:
+    if not os.path.exists(source_path):
+        raise RuntimeError(f"Audio file not found: {source_path}")
+
+    if os.path.getsize(source_path) <= max_bytes:
+        return [source_path]
+
+    ffmpeg_location = _find_ffmpeg_location()
+    ffmpeg_bin = str(Path(ffmpeg_location) / "ffmpeg.exe") if ffmpeg_location else "ffmpeg"
+    source = Path(source_path)
+    out_pattern = source.with_name(f"{source.stem}_part%03d{source.suffix}")
+
+    logger.info("Splitting large file path=%s", source_path)
+
+    def _split() -> None:
+        subprocess.run(
+            [
+                ffmpeg_bin,
+                "-y",
+                "-i",
+                str(source),
+                "-f",
+                "segment",
+                "-segment_time",
+                str(split_seconds),
+                "-c",
+                "copy",
+                str(out_pattern),
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+
+    await asyncio.to_thread(_split)
+
+    parts = sorted(str(p) for p in source.parent.glob(f"{source.stem}_part*{source.suffix}"))
+    if not parts:
+        raise RuntimeError("Could not split large audio file.")
+
+    safe_parts = [p for p in parts if os.path.getsize(p) <= max_bytes]
+    if not safe_parts:
+        raise RuntimeError("Split parts are still above Telegram limit.")
+
+    logger.info("Split complete parts=%s", len(safe_parts))
+    return safe_parts
 

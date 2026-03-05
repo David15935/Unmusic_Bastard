@@ -1,57 +1,82 @@
-﻿import os
+import importlib.util
 import logging
+import os
 from pathlib import Path
+from typing import Optional
+
 from dotenv import load_dotenv
 from telegram import BotCommand
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters
+from telegram.ext import (
+    Application,
+    ApplicationBuilder,
+    CallbackQueryHandler,
+    CommandHandler,
+    MessageHandler,
+    filters,
+)
 
 from bot.handlers import (
-    log_update,
-    start,
-    play,
+    button_handler,
     download,
-    lyrics,
+    error_handler,
     info,
-    trending,
+    log_update,
+    lyrics,
+    play,
+    playlist,
+    resume,
     show_queue,
     skip,
-    playlist,
-    button_handler,
-    error_handler,
+    start,
+    trending,
 )
 
 load_dotenv()
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+BASE_DIR = Path(__file__).resolve().parent.parent
+LOG_DIR = BASE_DIR / "logs"
+LOG_FILE = LOG_DIR / "bot.log"
+CONFIG_FILE = BASE_DIR / "config" / "config.py"
+
 LOCAL_BOT_API_URL = os.getenv("LOCAL_BOT_API_URL")
 LOCAL_BOT_API_FILE_URL = os.getenv("LOCAL_BOT_API_FILE_URL")
-if not BOT_TOKEN:
-    try:
-        from config.config import BOT_TOKEN as CONFIG_TOKEN
-
-        BOT_TOKEN = CONFIG_TOKEN
-    except Exception:
-        BOT_TOKEN = None
-
-if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN not set. Add it to .env or config/config.py")
-
-LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
-LOG_DIR.mkdir(parents=True, exist_ok=True)
-LOG_FILE = LOG_DIR / "bot.log"
-
-logging.basicConfig(
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-    level=logging.DEBUG,
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(LOG_FILE, encoding="utf-8"),
-    ],
-)
-logger = logging.getLogger(__name__)
 
 
-async def set_commands(app):
+def _read_token_from_config() -> Optional[str]:
+    if not CONFIG_FILE.exists():
+        return None
+
+    spec = importlib.util.spec_from_file_location("bot_local_config", str(CONFIG_FILE))
+    if not spec or not spec.loader:
+        return None
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return getattr(module, "BOT_TOKEN", None)
+
+
+def _get_bot_token() -> str:
+    token = os.getenv("BOT_TOKEN")
+    if not token:
+        token = _read_token_from_config()
+    if not token:
+        raise RuntimeError("BOT_TOKEN not set. Add it to .env or config/config.py")
+    return token
+
+
+def _configure_logging() -> None:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+        level=logging.INFO,
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler(LOG_FILE, encoding="utf-8"),
+        ],
+    )
+
+
+async def set_commands(app: Application) -> None:
     commands = [
         BotCommand("start", "Start the bot"),
         BotCommand("play", "Search and play a song"),
@@ -62,12 +87,15 @@ async def set_commands(app):
         BotCommand("queue", "Show current queue"),
         BotCommand("skip", "Skip to next queued song"),
         BotCommand("playlist", "Manage playlists"),
+        BotCommand("resume", "Resume pending upload"),
     ]
     await app.bot.set_my_commands(commands)
 
 
-def build_app():
-    builder = ApplicationBuilder().token(BOT_TOKEN)
+def build_app() -> Application:
+    token = _get_bot_token()
+    builder = ApplicationBuilder().token(token)
+
     if LOCAL_BOT_API_URL:
         builder = builder.base_url(LOCAL_BOT_API_URL)
         if LOCAL_BOT_API_FILE_URL:
@@ -77,7 +105,6 @@ def build_app():
     app = builder.build()
 
     app.add_handler(MessageHandler(filters.ALL, log_update, block=False), group=1)
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("play", play))
     app.add_handler(CommandHandler("download", download))
@@ -87,16 +114,17 @@ def build_app():
     app.add_handler(CommandHandler("queue", show_queue))
     app.add_handler(CommandHandler("skip", skip))
     app.add_handler(CommandHandler("playlist", playlist))
-
+    app.add_handler(CommandHandler("resume", resume))
     app.add_handler(CallbackQueryHandler(button_handler))
 
     app.add_error_handler(error_handler)
     app.post_init = set_commands
-
     return app
 
 
-def main():
+def main() -> None:
+    _configure_logging()
+    logger = logging.getLogger(__name__)
     logger.info("Starting Music Bot...")
     app = build_app()
     app.run_polling()
